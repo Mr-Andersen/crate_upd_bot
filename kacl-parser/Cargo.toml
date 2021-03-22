@@ -1,0 +1,13 @@
+[package]
+name = "kacl-parser"
+version = "0.1.0"
+authors = ["Mr-Andersen <andrassy_anderson@protonmail.com>"]
+edition = "2018"
+
+[dependencies]
+# comrak = "0.10"
+# either = "1.6"
+iso8601 = { git = "https://github.com/Mr-Andersen/iso8601" }
+markdown = "0.3"
+nom = "6.1"
+versions = { git = "https://github.com/Mr-Andersen/rs-versions" }
