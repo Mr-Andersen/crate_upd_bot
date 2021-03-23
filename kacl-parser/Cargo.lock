@@ -54,14 +54,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fed34cd105917e91daa4da6b3728c47b068749d6a62c59811f06ed2ac71d9da7"
 
 [[package]]
-name = "iso8601"
-version = "0.4.1-alpha.0"
-source = "git+https://github.com/Mr-Andersen/iso8601#6712dc400792dcf5fc7821480121605f2c25d8ca"
-dependencies = [
- "nom",
-]
-
-[[package]]
 name = "itertools"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -74,7 +66,6 @@ dependencies = [
 name = "kacl-parser"
 version = "0.1.0"
 dependencies = [
- "iso8601",
  "markdown",
  "nom",
  "versions",

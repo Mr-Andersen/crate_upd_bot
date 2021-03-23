@@ -2,11 +2,13 @@
 use std::convert::TryFrom;
 
 // use either::Either;
-use iso8601::Date;
 use markdown as md;
+use parsers::Date;
 // use comrak as md;
 // use comrak::nodes::{NodeValue, NodeHeading};
 use versions::SemVer;
+
+mod parsers;
 
 #[derive(Debug, Clone)]
 pub enum Version {
@@ -107,23 +109,17 @@ impl TryFrom<&md::Block> for Version {
             Ok((i, version))
         }
 
+        // TODO: do not use `iso8601`: a) parsers work with u8 b) owner won't expose
+        // needed functions as public
         fn parse_date(i: &str) -> nom::IResult<&str, Date> {
-            use nom::{
-                character::complete::{char, space0},
-                error::Error
-            };
+            use nom::character::complete::{char, space0};
 
             let (i, _) = space0(i)?;
             let (i, _) = char('-')(i)?;
             let (i, _) = space0(i)?;
-            let (i, date) = iso8601::parsers::parse_date(i.as_ref()).map_err(|e| {
-                e.map(|Error { input, code }| Error {
-                    input: std::str::from_utf8(input).unwrap(),
-                    code,
-                })
-            })?;
+            let (i, date) = Date::parse(i)?;
 
-            Ok((std::str::from_utf8(i).unwrap(), date))
+            Ok((i, date))
         }
 
         named!(parse_date_opt<&str, Option<Date>>, opt!(parse_date));
@@ -140,43 +136,45 @@ impl TryFrom<&md::Block> for Version {
 }
 
 #[derive(Debug, Clone)]
-// Store (next_version, rest) maybe? (less unwraps)
-// Changelog(Option<(Version, I)>)
-pub struct Changelog<I>(I);
+pub struct Changelog<I>(Option<(Version, I)>);
 
-impl<I: Iterator<Item = md::Block>> Changelog<std::iter::Peekable<I>> {
+impl<I: Iterator<Item = md::Block>> Changelog<I> {
     /// Parses `md::Block` until `Version` parser succeeds,
     /// ignoring all other problems (e.g. not `# Changelog` as first header)
-    pub fn new(blks: I) -> Option<Self> {
-        let mut blks = blks.peekable();
-
+    pub fn new(mut blocks: I) -> Self {
         loop {
-            let b = blks.peek()?;
-            if Version::try_from(b).is_ok() {
-                return Some(Changelog(blks));
+            let block = match blocks.next() {
+                Some(block) => block,
+                None => return Changelog(None)
+            };
+            if let Ok(version) = Version::try_from(&block) {
+                return Changelog(Some((version, blocks)));
             }
-            blks.next().unwrap();
         }
     }
 }
 
-impl<I: Iterator<Item = md::Block>> Iterator for Changelog<std::iter::Peekable<I>> {
+impl<I: Iterator<Item = md::Block>> Iterator for Changelog<I> {
     type Item = (Version, Vec<md::Block>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let version = Version::try_from(&self.0.next()?).expect("Next entry to be valid Version");
+        let (version, mut blocks) = match self.0.take() {
+            Some(v) => v,
+            None => return None
+        };
+
         let mut contents = Vec::new();
 
         loop {
-            let b = match self.0.peek() {
-                Some(b) => b,
+            let block = match blocks.next() {
+                Some(block) => block,
                 None => return Some((version, contents)),
             };
-            if Version::try_from(b).is_ok() {
+            if let Ok(new_version) = Version::try_from(&block) {
+                self.0 = Some((new_version, blocks));
                 return Some((version, contents));
             }
-            // Correct, because `peek()` returned `Some`
-            contents.push(self.0.next().unwrap());
+            contents.push(block);
         }
     }
 }
@@ -189,7 +187,6 @@ mod tests {
     fn name() {
         let src = include_str!("test.md");
         Changelog::new(md::tokenize(src).into_iter())
-            .unwrap()
             .for_each(|(v, txt)| {
                 println!("\n<h1>Version = {:?}</h1>", v);
                 println!("{}", md::to_html(&md::generate_markdown(txt)));
