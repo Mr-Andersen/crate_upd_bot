@@ -5,8 +5,7 @@ authors = ["Mr-Andersen <andrassy_anderson@protonmail.com>"]
 edition = "2018"
 
 [dependencies]
-# comrak = "0.10"
-# either = "1.6"
-markdown = "0.3"
+comrak = "0.10"
+itertools = "0.10"
 nom = "6.1"
-versions = { git = "https://github.com/Mr-Andersen/rs-versions" }
+versions = "2.1"

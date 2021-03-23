@@ -1,11 +1,15 @@
 use nom::{
-    bytes::complete::{take, tag},
-    sequence::tuple,
+    bytes::complete::{tag, take},
     combinator::map,
     error::{Error, ErrorKind},
+    sequence::tuple,
     Err, IResult,
 };
-use std::{str, ops::{Add, Mul, Sub}};
+use std::{
+    fmt,
+    ops::{Add, Mul, Sub},
+    str,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Date {
@@ -14,9 +18,15 @@ pub struct Date {
     pub day: u8,
 }
 
-fn decimal_from_bytes<'s, 'b, I>(src: &'s [u8], bts: &[u8]) -> Result<I, Err<Error<&'s [u8]>>>
+impl fmt::Display for Date {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}-{}-{}", self.year, self.month, self.day)
+    }
+}
+
+fn decimal_from_bytes<'s, I>(src: &'s [u8], bts: &[u8]) -> Result<I, Err<Error<&'s [u8]>>>
 where
-    I: From<u8> + Add<I, Output=I> + Mul<I, Output=I> + Sub<I, Output=I>
+    I: From<u8> + Add<I, Output = I> + Mul<I, Output = I> + Sub<I, Output = I>,
 {
     bts.iter().try_fold(0u8.into(), |acc, &digit| match digit {
         b'0'..=b'9' => Ok(acc * 10u8.into() + digit.into() - b'0'.into()),
@@ -26,7 +36,7 @@ where
 
 fn decimal_n<I>(n: usize, i: &[u8]) -> IResult<&[u8], I>
 where
-    I: From<u8> + Add<I, Output=I> + Mul<I, Output=I> + Sub<I, Output=I>
+    I: From<u8> + Add<I, Output = I> + Mul<I, Output = I> + Sub<I, Output = I>,
 {
     let (i, digits) = take(n)(i)?;
     Ok((i, decimal_from_bytes(i, digits)?))
@@ -44,7 +54,12 @@ impl Date {
             )),
             |(year, _, month, _, day)| Date { year, month, day },
         )(i.as_bytes())
-            .map(|(i, d)| (str::from_utf8(i).unwrap(), d))
-            .map_err(|e| e.map(|Error { input, code }| Error { input: str::from_utf8(input).unwrap(), code }))
+        .map(|(i, d)| (str::from_utf8(i).unwrap(), d))
+        .map_err(|e| {
+            e.map(|Error { input, code }| Error {
+                input: str::from_utf8(input).unwrap(),
+                code,
+            })
+        })
     }
 }

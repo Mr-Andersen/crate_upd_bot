@@ -1,19 +1,27 @@
 //! KACL stands for for [keepachangelog](https://keepachangelog.com/en/1.0.0/)
-use std::convert::TryFrom;
-
-// use either::Either;
-use markdown as md;
+use comrak::nodes::{AstNode, NodeHeading, NodeValue};
+use itertools::Itertools;
 use parsers::Date;
-// use comrak as md;
-// use comrak::nodes::{NodeValue, NodeHeading};
+use std::convert::TryFrom;
 use versions::SemVer;
 
 mod parsers;
+
+const IO_VEC_ERR: &str = "IO errors shouldn't be possible when writing to Vec";
 
 #[derive(Debug, Clone)]
 pub enum Version {
     Unreleased,
     Released(SemVer, Option<Date>),
+}
+
+impl Version {
+    pub fn into_released(self) -> Option<(SemVer, Option<Date>)> {
+        match self {
+            Version::Unreleased => None,
+            Version::Released(v, d) => Some((v, d))
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -70,25 +78,33 @@ where
     Ok((i, v))
 }
 
-impl TryFrom<&md::Block> for Version {
+impl<'a> TryFrom<&'a AstNode<'a>> for Version {
     type Error = VersionParseError;
 
-    fn try_from(blk: &md::Block) -> Result<Self, Self::Error> {
+    fn try_from(node: &'a AstNode<'a>) -> Result<Self, Self::Error> {
         use nom::{named, opt};
 
-        let data = match blk {
-            md::Block::Header(data, 2) => data.as_slice(),
+        let data = match node.data.borrow().value {
+            NodeValue::Heading(NodeHeading { level: 2, .. }) => node
+                .children()
+                .exactly_one()
+                .map_err(|_| VersionParseError::SingleSpan)?,
             _ => return Err(VersionParseError::Header),
         };
-        let data = match data {
-            [md::Span::Text(data)] => data.as_str(),
-            _ => return Err(VersionParseError::SingleSpan),
+        let data = {
+            let mut s = Vec::new();
+            comrak::format_html(data, &comrak::ComrakOptions::default(), &mut s).expect(IO_VEC_ERR);
+            String::from_utf8(s).map_err(|e| e.utf8_error())?
         };
+        // let data = match data {
+        //     [comrak::Span::Text(data)] => data.as_str(),
+        //     _ => return Err(VersionParseError::SingleSpan),
+        // };
 
         fn parse_unreleased(i: &str) -> nom::IResult<&[u8], ()> {
             use nom::{character::complete::char, tag_no_case};
 
-            named!(unreleased, tag_no_case!(&"unreleased"[..]));
+            named!(unreleased, tag_no_case!("unreleased"));
 
             let (i, _) = unreleased(i.as_ref())
                 .or_else(|_| between(char('['), unreleased, char(']'), i.as_ref()))?;
@@ -124,12 +140,12 @@ impl TryFrom<&md::Block> for Version {
 
         named!(parse_date_opt<&str, Option<Date>>, opt!(parse_date));
 
-        if let Ok((_, ())) = parse_unreleased(data) {
+        if let Ok((_, ())) = parse_unreleased(&data) {
             return Ok(Version::Unreleased);
         }
 
-        let (data, version) = parse_released(data)?;
-        let (_, opt_date) = parse_date_opt(data.as_ref())?;
+        let (data, version) = parse_released(&data)?;
+        let (_, opt_date) = parse_date_opt(data)?;
 
         Ok(Version::Released(version, opt_date))
     }
@@ -138,29 +154,29 @@ impl TryFrom<&md::Block> for Version {
 #[derive(Debug, Clone)]
 pub struct Changelog<I>(Option<(Version, I)>);
 
-impl<I: Iterator<Item = md::Block>> Changelog<I> {
-    /// Parses `md::Block` until `Version` parser succeeds,
+impl<'a, I: Iterator<Item = &'a AstNode<'a>>> Changelog<I> {
+    /// Parses `comrak::Block` until `Version` parser succeeds,
     /// ignoring all other problems (e.g. not `# Changelog` as first header)
     pub fn new(mut blocks: I) -> Self {
         loop {
             let block = match blocks.next() {
                 Some(block) => block,
-                None => return Changelog(None)
+                None => return Changelog(None),
             };
-            if let Ok(version) = Version::try_from(&block) {
+            if let Ok(version) = Version::try_from(block) {
                 return Changelog(Some((version, blocks)));
             }
         }
     }
 }
 
-impl<I: Iterator<Item = md::Block>> Iterator for Changelog<I> {
-    type Item = (Version, Vec<md::Block>);
+impl<'a, I: Iterator<Item = &'a AstNode<'a>>> Iterator for Changelog<I> {
+    type Item = (Version, Vec<&'a AstNode<'a>>);
 
     fn next(&mut self) -> Option<Self::Item> {
         let (version, mut blocks) = match self.0.take() {
             Some(v) => v,
-            None => return None
+            None => return None,
         };
 
         let mut contents = Vec::new();
@@ -170,7 +186,7 @@ impl<I: Iterator<Item = md::Block>> Iterator for Changelog<I> {
                 Some(block) => block,
                 None => return Some((version, contents)),
             };
-            if let Ok(new_version) = Version::try_from(&block) {
+            if let Ok(new_version) = Version::try_from(block) {
                 self.0 = Some((new_version, blocks));
                 return Some((version, contents));
             }
@@ -186,10 +202,47 @@ mod tests {
     #[test]
     fn name() {
         let src = include_str!("test.md");
-        Changelog::new(md::tokenize(src).into_iter())
-            .for_each(|(v, txt)| {
-                println!("\n<h1>Version = {:?}</h1>", v);
-                println!("{}", md::to_html(&md::generate_markdown(txt)));
+        let arena = comrak::Arena::new();
+        Changelog::new(
+            comrak::parse_document(&arena, src, &comrak::ComrakOptions::default()).children(),
+        )
+        .for_each(|(v, nodes)| {
+            println!("\n<h2>Version = {:?}</h2>", v);
+            let mut s = Vec::new();
+            nodes.into_iter().for_each(|node| {
+                comrak::format_html(node, &comrak::ComrakOptions::default(), &mut s)
+                    .expect(IO_VEC_ERR);
+                s.push(b'\n');
             });
+            println!("{}", String::from_utf8(s).expect("Nooo"));
+        });
+    }
+
+    #[test]
+    fn top_release() {
+        let src = include_str!("test.md");
+        let arena = comrak::Arena::new();
+        let (v, blocks) = Changelog::new(
+            comrak::parse_document(&arena, src, &comrak::ComrakOptions::default()).children(),
+        )
+            .filter(|(version, _)| matches!(version, Version::Released(..)))
+            .next().unwrap();
+        let (sv, d) = v.into_released().unwrap();
+        print!("{}", sv);
+        if let Some(d) = d {
+            println!(" - {}", d);
+        } else {
+            println!("")
+        }
+
+        let mut s = Vec::new();
+
+        blocks.into_iter().for_each(|node| {
+            comrak::format_html(node, &comrak::ComrakOptions::default(), &mut s)
+                .expect(IO_VEC_ERR);
+            s.push(b'\n');
+        });
+
+        println!("{}", String::from_utf8(s).unwrap());
     }
 }
