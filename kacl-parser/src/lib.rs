@@ -1,7 +1,8 @@
 //! KACL stands for for [keepachangelog](https://keepachangelog.com/en/1.0.0/)
 use comrak::nodes::AstNode;
+pub use date::Date;
 use std::convert::TryFrom;
-use version::Version;
+pub use version::{Version, VersionParseError};
 
 mod date;
 mod version;

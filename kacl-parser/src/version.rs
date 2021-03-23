@@ -22,13 +22,13 @@ impl Version {
 #[derive(Debug)]
 pub enum VersionParseError {
     /// Block has to be header of 2nd level:
-    /// - ## ...
+    /// - `## ...`
     Header,
     /// Header contents must be a single AST node
     SingleSpan,
     /// Header contents have to match one of following (case-insensitive):
-    /// - [\[] "unreleased" [\]]
-    /// - [\[] semver::Version [\]] [ "-" chrono::NaiveDate ]
+    /// - `[\[] "unreleased" [\]]`
+    /// - `[\[] semver::Version [\]] [ "-" chrono::NaiveDate ]`
     Format(nom::Err<nom::error::Error<String>>),
     /// For `&[u8] -> &str` conversions
     Utf8(std::str::Utf8Error),
@@ -91,10 +91,6 @@ impl<'a> TryFrom<&'a AstNode<'a>> for Version {
             comrak::format_html(data, &comrak::ComrakOptions::default(), &mut s).expect(IO_VEC_ERR);
             String::from_utf8(s).map_err(|e| e.utf8_error())?
         };
-        // let data = match data {
-        //     [comrak::Span::Text(data)] => data.as_str(),
-        //     _ => return Err(VersionParseError::SingleSpan),
-        // };
 
         fn parse_unreleased(i: &str) -> nom::IResult<&[u8], ()> {
             use nom::{character::complete::char, tag_no_case};
@@ -120,8 +116,6 @@ impl<'a> TryFrom<&'a AstNode<'a>> for Version {
             Ok((i, version))
         }
 
-        // TODO: do not use `iso8601`: a) parsers work with u8 b) owner won't expose
-        // needed functions as public
         fn parse_date(i: &str) -> nom::IResult<&str, Date> {
             use nom::character::complete::{char, space0};
 
